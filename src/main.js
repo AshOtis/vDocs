@@ -3,7 +3,7 @@
  * PIN opens it. Text documents only; it uses your Obsidian theme. Documents stay encrypted on disk. */
 
 const VD_VIEW = 'vdocs-view';
-const VD_SET = { vaultPath: '', idle: 5, device: '', lockOnLeave: true, exportDir: '', bg: 'none', bgImage: '', bgGlow: 35, bgDim: 50 };
+const VD_SET = { vaultPath: '', idle: 5, device: '', lockOnLeave: true, exportDir: '', exportWhere: 'vault', exportPcDir: '', bg: 'none', bgImage: '', bgGlow: 35, bgDim: 50 };
 const VD_BGS = { none: 'None', aurora: 'Static Aurora (live colours)', dusk: 'Dusk', north: 'Northern lights', own: 'Your own picture' };
 const VD_IMG = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp'];
 const VD_LOCAL = 'vdocs-local';
@@ -26,12 +26,11 @@ class VDocsPlugin extends Plugin {
     this.registerInterval(window.setInterval(() => {
       if (this.key && this.set.idle > 0 && Date.now() - (this.lastActive || 0) > this.set.idle * 60000) this.lock();
     }, 15000));
-    // leaving vDocs for another note or tab locks it, so coming back needs the PIN
-    this.registerEvent(this.app.workspace.on('active-leaf-change', leaf => {
-      if (!this.key || this.set.lockOnLeave === false) return;
-      if (leaf && leaf.view instanceof VDocsView) return;
-      this.lock();
-    }));
+    // vDocs locks once it's out of sight (another tab in front of it, or a note opened in its place).
+    // Clicking a sidebar or another pane while vDocs is still on screen doesn't count.
+    const check = () => { window.clearTimeout(this.leaveT); this.leaveT = window.setTimeout(() => { if (this.key && this.set.lockOnLeave !== false && !this.shown()) this.lock(); }, 120); };
+    this.registerEvent(this.app.workspace.on('active-leaf-change', check));
+    this.registerEvent(this.app.workspace.on('layout-change', check));
     // the vDocs app (or a sync service) changed the vault: read it again
     this.registerEvent(this.app.vault.on('modify', f => { if (this.store && f && f.path === this.store.path) this.soonReload(); }));
   }
@@ -39,27 +38,45 @@ class VDocsPlugin extends Plugin {
   save() { return this.saveData(this.set); }
 
   /* ---------- this device: its id, its name, and the PIN copy of the key (never synced) ---------- */
-  local() { try { return JSON.parse(this.app.loadLocalStorage ? this.app.loadLocalStorage(VD_LOCAL) || '{}' : window.localStorage.getItem(VD_LOCAL + ':' + this.app.vault.getName()) || '{}'); } catch (e) { return {}; } }
-  saveLocal(o) {
-    const s = JSON.stringify(o);
-    if (this.app.saveLocalStorage) this.app.saveLocalStorage(VD_LOCAL, s); else window.localStorage.setItem(VD_LOCAL + ':' + this.app.vault.getName(), s);
+  // kept in this device's browser storage, one entry for this Obsidian vault: never in the vault, so never synced
+  localKey(part) { return VD_LOCAL + ':' + (this.app.appId || this.app.vault.getName()) + (part ? ':' + part : ''); }
+  readLocal(part) {
+    try { const raw = window.localStorage.getItem(this.localKey(part)); if (raw != null) { const o = JSON.parse(raw); if (o && typeof o === 'object') return o; } } catch (e) { /* unreadable: treat as empty */ }
+    return null;
   }
+  writeLocal(part, o) {
+    try { if (o == null) window.localStorage.removeItem(this.localKey(part)); else window.localStorage.setItem(this.localKey(part), JSON.stringify(o)); return true; }
+    catch (e) { return false; }   // storage full: the caller says so
+  }
+  local() {
+    let o = this.readLocal();
+    if (!o && this.app.loadLocalStorage) {     // carry over what 1.0 kept (either way Obsidian stored it)
+      try { let v = this.app.loadLocalStorage(VD_LOCAL); if (typeof v === 'string') v = JSON.parse(v); if (v && typeof v === 'object') { o = { device: v.device, pins: v.pins }; this.writeLocal(null, o); } } catch (e) { /* nothing to carry over */ }
+    }
+    return o || {};
+  }
+  saveLocal(o) { return this.writeLocal(null, { device: o.device, pins: o.pins }); }
   deviceId() { const o = this.local(); if (!o.device) { o.device = vdId().slice(1, 13); this.saveLocal(o); } return o.device; }
   deviceName() { return this.set.device || (Platform.isMobile ? 'Phone or tablet' : 'Obsidian') + ' (' + this.deviceId().slice(0, 4) + ')'; }
   pinRec() { const o = this.local(); return this.store && o.pins ? o.pins[this.store.header.id] || null : null; }
   savePinRec(rec) { const o = this.local(); o.pins = o.pins || {}; if (rec) o.pins[this.store.header.id] = rec; else delete o.pins[this.store.header.id]; this.saveLocal(o); }
 
   // where an exported .vdoc goes: the folder in settings (or next to the vault), with a name not already taken
-  async exportPath(title) {
-    const ad = this.app.vault.adapter, base = (title || 'Document').replace(/[\\/:*?"<>|#^[\]]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Document';
-    let dir = (this.set.exportDir || '').replace(/^\/+|\/+$/g, '');
+  async exportPath(title, chosen) {
+    const ad = this.app.vault.adapter, base = vdSafeName(title);
+    let dir = (chosen != null ? chosen : this.set.exportDir || '').replace(/^\/+|\/+$/g, '');
     if (!dir && this.store) dir = this.store.path.includes('/') ? this.store.path.slice(0, this.store.path.lastIndexOf('/')) : '';
     if (dir && !(await ad.exists(dir))) await ad.mkdir(dir);
     for (let n = 1; n < 500; n++) { const p = (dir ? dir + '/' : '') + base + (n > 1 ? ` (${n})` : '') + '.vdoc'; if (!(await ad.exists(p))) return p; }
     throw new Error('too many files with that name');
   }
   redrawBg() { const v = this.view(); if (v) v.paintBackground(); }
-  view() { const l = this.app.workspace.getLeavesOfType(VD_VIEW)[0]; return l && l.view instanceof VDocsView ? l.view : null; }
+  // is vDocs on screen right now? (its tab is the one showing, and it's in the layout)
+  shown() {
+    const l = this.app.workspace.getLeavesOfType(VD_VIEW)[0], el = l && l.view && l.view.containerEl;
+    return !!(el && el.isConnected && el.offsetParent !== null && el.getClientRects().length);
+  }
+  view() { const l = this.app.workspace.getLeavesOfType(VD_VIEW)[0]; return l && l.view && l.view.getViewType && l.view.getViewType() === VD_VIEW ? l.view : null; }
   async open() {
     let leaf = this.app.workspace.getLeavesOfType(VD_VIEW)[0];
     if (!leaf) { leaf = this.app.workspace.getLeaf('tab'); await leaf.setViewState({ type: VD_VIEW, active: true }); }
@@ -67,7 +84,11 @@ class VDocsPlugin extends Plugin {
   }
 
   // where the vault is: the one in settings, or the only .vdocs file in this Obsidian vault
-  findVaults() { return this.app.vault.getFiles().filter(f => f.extension === 'vdocs').map(f => f.path).sort(); }
+  // .vdocs files in this vault, but not the app's backups or merged sync copies
+  findVaults() {
+    return this.app.vault.getFiles().filter(f => (f.extension || '').toLowerCase() === 'vdocs' && !/(^|\/)vDocs Backups\//i.test(f.path) && !/ \d{4}-\d\d-\d\d \d{4}\.vdocs$/i.test(f.path)).map(f => f.path)
+      .sort((a, b) => (/(^|\/)Vault\.vdocs$/i.test(b) ? 1 : 0) - (/(^|\/)Vault\.vdocs$/i.test(a) ? 1 : 0) || a.localeCompare(b));
+  }
   vaultPath() {
     if (this.set.vaultPath && this.app.vault.getAbstractFileByPath(this.set.vaultPath)) return this.set.vaultPath;
     const all = this.findVaults();
@@ -134,7 +155,11 @@ class VDocsView extends ItemView {
   getDisplayText() { return 'vDocs'; }
   getIcon() { return 'lock-keyhole'; }
   async onOpen() { this.render(); }
-  async onClose() { if (this.dirty) await this.flush(); }
+  async onClose() {
+    if (this.dirty) await this.flush();
+    // closing vDocs (or opening a note in its tab) locks it, so opening it again needs the PIN
+    if (this.p.key && this.p.set.lockOnLeave !== false) { if (this.p.store) this.p.store.save().catch(() => { }); this.p.forget(); }
+  }
 
   // the background: Static Aurora's live colours, a built-in picture, or one of yours from this vault
   paintBackground() {
@@ -466,7 +491,7 @@ class VDocsSettings extends PluginSettingTab {
     const all = p.findVaults();
     new Setting(el).setName('Vault file').setDesc(all.length ? 'Your Vault.vdocs file inside this Obsidian vault.' : 'No .vdocs file found in this Obsidian vault yet.')
       .addDropdown(d => { d.addOption('', all.length === 1 ? 'Find it for me' : 'Choose…'); for (const a of all) d.addOption(a, a); d.setValue(all.includes(s.vaultPath) ? s.vaultPath : '').onChange(async v => { s.vaultPath = v; await p.save(); p.forget(); p.store = null; const vw = p.view(); if (vw) vw.render(); }); });
-    new Setting(el).setName('Lock when I leave vDocs').setDesc('Going to another note or tab locks vDocs, and your PIN opens it again.')
+    new Setting(el).setName('Lock when I leave vDocs').setDesc('Switching to another tab, or opening a note where vDocs was, locks it. Clicking around while vDocs is still on screen doesn’t.')
       .addToggle(t => t.setValue(s.lockOnLeave !== false).onChange(async v => { s.lockOnLeave = v; await p.save(); }));
     new Setting(el).setName('Lock after').setDesc('Locks itself when you’ve been away from Obsidian this long. Your PIN opens it again.')
       .addDropdown(d => d.addOptions({ 1: '1 minute', 5: '5 minutes', 15: '15 minutes', 30: '30 minutes', 60: '1 hour', 0: 'Never' }).setValue(String(s.idle)).onChange(async v => { s.idle = Number(v); await p.save(); }));

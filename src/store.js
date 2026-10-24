@@ -44,9 +44,12 @@ class VDStore {
 
   // changes not saved yet are kept on this device (they're already encrypted), so closing Obsidian doesn't lose them
   pendingKey() { return 'pending:' + (this.header ? this.header.id : ''); }
-  keepPending() { const o = this.p.local(); o[this.pendingKey()] = this.waiting() || Object.keys(this.pending.versions).length ? this.pending : undefined; this.p.saveLocal(o); }
+  keepPending() {
+    const any = this.waiting() || Object.keys(this.pending.versions).length;
+    this.notKept = !this.p.writeLocal(this.pendingKey(), any ? this.pending : null);   // its own entry: if it's ever too big, the PIN is unaffected
+  }
   restorePending() {
-    const saved = this.p.local()[this.pendingKey()];
+    const saved = this.p.readLocal(this.pendingKey());
     if (!saved) return;
     for (const it of Object.values(saved.items || {})) if (!this.pending.items[it.id] || this.pending.items[it.id].updated < it.updated) this.pending.items[it.id] = it;
     for (const v of Object.values(saved.versions || {})) this.pending.versions[v.id] = v;

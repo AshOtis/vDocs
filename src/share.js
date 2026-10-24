@@ -30,6 +30,17 @@ class VDShareModal extends Modal {
     c.createDiv({ text: 'Hint (optional, not encrypted)', cls: 'vdo-label' });
     const hint = c.createEl('input', { cls: 'vdo-input vdo-left', attr: { placeholder: 'e.g. the café where we met', maxlength: '120', 'aria-label': 'Hint' } });
     c.createEl('p', { cls: 'vdo-small', text: 'Anyone who gets the file can read the hint, so keep it vague.' });
+    // where it goes: a folder in this Obsidian vault, or (on a computer) anywhere you like
+    const p = v.p, st = p.set;
+    this.dest = st.exportWhere === 'pc' && vdPcDialog() ? { pc: true } : { dir: st.exportDir || '' };
+    c.createDiv({ text: 'Save to', cls: 'vdo-label' });
+    const where = c.createDiv({ cls: 'vdo-where' });
+    const whereT = where.createSpan({ cls: 'vdo-where-t' });
+    const paintWhere = () => whereT.setText(this.dest.pc ? 'Somewhere on this computer (you choose when you save)' : (this.dest.dir ? this.dest.dir : 'Next to your vault file') + ' (in this Obsidian vault)');
+    paintWhere();
+    const wb = c.createDiv({ cls: 'vdo-row vdo-row-l' });
+    wb.createEl('button', { text: 'In my vault…' }).onclick = () => new VDFolderPicker(this.app, dir => { this.dest = { dir }; st.exportWhere = 'vault'; st.exportDir = dir; p.save(); paintWhere(); }).open();
+    if (vdPcDialog()) wb.createEl('button', { text: 'Somewhere else on this computer…' }).onclick = () => { this.dest = { pc: true }; st.exportWhere = 'pc'; p.save(); paintWhere(); };
     const err = c.createDiv({ cls: 'vdo-err' });
     const row = c.createDiv({ cls: 'vdo-row' });
     row.createEl('button', { text: 'Cancel' }).onclick = () => this.close();
@@ -42,8 +53,17 @@ class VDShareModal extends Modal {
       try {
         if (v.dirty) await v.flush();
         const text = await vdSealShare({ title: v.titleOf(d), html: d.html, created: d.created, updated: d.updated }, p1.value, hint.value.trim());
-        const path = await v.p.exportPath(v.titleOf(d));
-        await v.app.vault.adapter.write(path, text);
+        let path;
+        if (this.dest.pc) {
+          const r = await vdPcDialog().showSaveDialog({ title: 'Save the encrypted copy', defaultPath: vdJoinPc(v.p.set.exportPcDir, vdSafeName(v.titleOf(d)) + '.vdoc'), filters: [{ name: 'vDocs document', extensions: ['vdoc'] }] });
+          if (!r || r.canceled || !r.filePath) { go.disabled = false; go.setText('Save .vdoc'); return; }
+          path = /\.vdoc$/i.test(r.filePath) ? r.filePath : r.filePath + '.vdoc';
+          await require('fs').promises.writeFile(path, text, 'utf8');
+          v.p.set.exportPcDir = require('path').dirname(path); v.p.save();
+        } else {
+          path = await v.p.exportPath(v.titleOf(d), this.dest.dir);
+          await v.app.vault.adapter.write(path, text);
+        }
         this.close();
         new Notice(`Saved ${path}. Remember to send the password separately.`, 8000);
       } catch (e) { err.setText('Could not save: ' + (e.message || e)); go.disabled = false; go.setText('Save .vdoc'); }
@@ -53,12 +73,50 @@ class VDShareModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
-// choose a .vdoc from this Obsidian vault, then its password
+// the computer's own Save box (desktop Obsidian only)
+function vdPcDialog() {
+  if (Platform.isMobile || typeof require !== 'function') return null;
+  try { const r = require('@electron/remote'); if (r && r.dialog) return r.dialog; } catch (e) { /* try the older way */ }
+  try { const e = require('electron'); if (e && e.remote && e.remote.dialog) return e.remote.dialog; } catch (e) { /* none */ }
+  return null;
+}
+function vdSafeName(t) { return (t || 'Document').replace(/[\\/:*?"<>|#^[\]]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Document'; }
+function vdJoinPc(dir, name) { if (!dir) return name; try { return require('path').join(dir, name); } catch (e) { return name; } }
+
+// choose a folder in this Obsidian vault
+class VDFolderPicker extends FuzzySuggestModal {
+  constructor(app, done) { super(app); this.done = done; this.setPlaceholder('Choose a folder in your vault'); }
+  getItems() { return [{ path: '', label: 'Next to my vault file' }].concat(this.app.vault.getAllLoadedFiles().filter(f => f.children && f.path && f.path !== '/').map(f => ({ path: f.path, label: f.path }))); }
+  getItemText(f) { return f.label; }
+  onChooseItem(f) { this.done(f.path); }
+}
+
+// choose a .vdoc: from this Obsidian vault, or (on a computer) from anywhere
 class VDVdocPicker extends FuzzySuggestModal {
-  constructor(view) { super(view.app); this.v = view; this.setPlaceholder('Find a .vdoc file in your vault'); }
-  getItems() { return this.app.vault.getFiles().filter(f => (f.extension || '').toLowerCase() === 'vdoc'); }
+  constructor(view) { super(view.app); this.v = view; this.setPlaceholder('Find a .vdoc file'); }
+  open() {
+    if (!this.files().length) {        // nothing in the vault: go straight to the computer's Open box, or explain
+      if (vdPcDialog()) { this.browse(); return; }
+      new Notice('vDocs: there are no .vdoc files in this vault yet. Put the .vdoc file in your vault (for example by syncing it or saving it there), then try again.', 9000);
+      return;
+    }
+    super.open();
+  }
+  files() { return this.app.vault.getFiles().filter(f => (f.extension || '').toLowerCase() === 'vdoc'); }
+  getItems() { return (vdPcDialog() ? [{ browse: true, path: 'Browse this computer…' }] : []).concat(this.files()); }
   getItemText(f) { return f.path; }
-  async onChooseItem(f) { new VDOpenModal(this.v, await this.app.vault.adapter.read(f.path), f.path.split('/').pop()).open(); }
+  async onChooseItem(f) {
+    if (f.browse) { this.browse(); return; }
+    new VDOpenModal(this.v, await this.app.vault.adapter.read(f.path), f.path.split('/').pop()).open();
+  }
+  async browse() {
+    try {
+      const r = await vdPcDialog().showOpenDialog({ title: 'Open a shared .vdoc', properties: ['openFile'], defaultPath: this.v.p.set.exportPcDir || undefined, filters: [{ name: 'vDocs document', extensions: ['vdoc'] }] });
+      if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return;
+      const p = r.filePaths[0], text = await require('fs').promises.readFile(p, 'utf8');
+      new VDOpenModal(this.v, text, require('path').basename(p)).open();
+    } catch (e) { new Notice('vDocs: could not open that file. ' + (e.message || e)); }
+  }
 }
 class VDOpenModal extends Modal {
   constructor(view, text, name) { super(view.app); this.v = view; this.text = text; this.name = name; }
