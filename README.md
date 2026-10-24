@@ -8,6 +8,9 @@ Open your encrypted [vDocs](https://alabz.co.uk) vault inside Obsidian. Your pri
 - In Obsidian, open **vDocs** from the ribbon or the command palette. The first time on each device, type your vDocs password (or your recovery key), then choose a PIN. From then on the PIN opens it.
 - Read, write and organise text documents: headings, bold, italic, lists, checklists and quotes. Your folders from vDocs show in the sidebar. New documents go in the folder you've selected.
 - Move documents to the Bin and restore them. Emptying the Bin is done in the vDocs app.
+- **Export as .vdoc:** save one document as its own encrypted file with a password just for it (and an optional hint), to send to someone. **Open a .vdoc** reads one back and can add it to your vault. Same format as the vDocs app, so they open in either.
+- **Backgrounds:** Static Aurora (follows the Static Aurora theme's live colours), Dusk, Northern lights, or your own picture from your vault, with glow and darken.
+- Locks when you leave vDocs for another note (you can switch that off).
 - It uses your Obsidian theme. Pictures already in a document still show; adding pictures, galleries, sounds and focus tools stay in the vDocs app.
 
 ## Saving

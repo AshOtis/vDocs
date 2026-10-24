@@ -3,7 +3,9 @@
  * PIN opens it. Text documents only; it uses your Obsidian theme. Documents stay encrypted on disk. */
 
 const VD_VIEW = 'vdocs-view';
-const VD_SET = { vaultPath: '', idle: 5, device: '' };
+const VD_SET = { vaultPath: '', idle: 5, device: '', lockOnLeave: true, exportDir: '', bg: 'none', bgImage: '', bgGlow: 35, bgDim: 50 };
+const VD_BGS = { none: 'None', aurora: 'Static Aurora (live colours)', dusk: 'Dusk', north: 'Northern lights', own: 'Your own picture' };
+const VD_IMG = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp'];
 const VD_LOCAL = 'vdocs-local';
 
 class VDocsPlugin extends Plugin {
@@ -14,6 +16,8 @@ class VDocsPlugin extends Plugin {
     this.addCommand({ id: 'open', name: 'Open vDocs', callback: () => this.open() });
     this.addCommand({ id: 'lock', name: 'Lock vDocs now', callback: () => this.lock() });
     this.addCommand({ id: 'new', name: 'New vDocs document', callback: async () => { await this.open(); const v = this.view(); if (v && this.key) v.newDoc(); } });
+    this.addCommand({ id: 'open-vdoc', name: 'Open a shared .vdoc file', callback: async () => { await this.open(); const v = this.view(); if (v && this.key) new VDVdocPicker(v).open(); else new Notice('vDocs: unlock first, then open the .vdoc.'); } });
+    this.addCommand({ id: 'export-vdoc', name: 'Export this document as a .vdoc', callback: () => { const v = this.view(); if (v && this.key && v.cur) new VDShareModal(v, v.cur).open(); else new Notice('vDocs: open a document first.'); } });
     this.addSettingTab(new VDocsSettings(this.app, this));
     // anything you do in Obsidian counts as being here; the idle lock starts counting when you stop
     const here = () => { this.lastActive = Date.now(); };
@@ -22,6 +26,12 @@ class VDocsPlugin extends Plugin {
     this.registerInterval(window.setInterval(() => {
       if (this.key && this.set.idle > 0 && Date.now() - (this.lastActive || 0) > this.set.idle * 60000) this.lock();
     }, 15000));
+    // leaving vDocs for another note or tab locks it, so coming back needs the PIN
+    this.registerEvent(this.app.workspace.on('active-leaf-change', leaf => {
+      if (!this.key || this.set.lockOnLeave === false) return;
+      if (leaf && leaf.view instanceof VDocsView) return;
+      this.lock();
+    }));
     // the vDocs app (or a sync service) changed the vault: read it again
     this.registerEvent(this.app.vault.on('modify', f => { if (this.store && f && f.path === this.store.path) this.soonReload(); }));
   }
@@ -39,6 +49,16 @@ class VDocsPlugin extends Plugin {
   pinRec() { const o = this.local(); return this.store && o.pins ? o.pins[this.store.header.id] || null : null; }
   savePinRec(rec) { const o = this.local(); o.pins = o.pins || {}; if (rec) o.pins[this.store.header.id] = rec; else delete o.pins[this.store.header.id]; this.saveLocal(o); }
 
+  // where an exported .vdoc goes: the folder in settings (or next to the vault), with a name not already taken
+  async exportPath(title) {
+    const ad = this.app.vault.adapter, base = (title || 'Document').replace(/[\\/:*?"<>|#^[\]]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Document';
+    let dir = (this.set.exportDir || '').replace(/^\/+|\/+$/g, '');
+    if (!dir && this.store) dir = this.store.path.includes('/') ? this.store.path.slice(0, this.store.path.lastIndexOf('/')) : '';
+    if (dir && !(await ad.exists(dir))) await ad.mkdir(dir);
+    for (let n = 1; n < 500; n++) { const p = (dir ? dir + '/' : '') + base + (n > 1 ? ` (${n})` : '') + '.vdoc'; if (!(await ad.exists(p))) return p; }
+    throw new Error('too many files with that name');
+  }
+  redrawBg() { const v = this.view(); if (v) v.paintBackground(); }
   view() { const l = this.app.workspace.getLeavesOfType(VD_VIEW)[0]; return l && l.view instanceof VDocsView ? l.view : null; }
   async open() {
     let leaf = this.app.workspace.getLeavesOfType(VD_VIEW)[0];
@@ -116,7 +136,17 @@ class VDocsView extends ItemView {
   async onOpen() { this.render(); }
   async onClose() { if (this.dirty) await this.flush(); }
 
+  // the background: Static Aurora's live colours, a built-in picture, or one of yours from this vault
+  paintBackground() {
+    const s = this.p.set, host = this.containerEl;
+    let bg = VD_BGS[s.bg] ? s.bg : 'none', own = null;
+    if (bg === 'own') { const f = this.app.vault.getAbstractFileByPath(s.bgImage || ''); if (f && VD_IMG.includes((f.extension || '').toLowerCase())) own = this.app.vault.getResourcePath(f); else bg = 'none'; }
+    for (const k of Object.keys(VD_BGS)) host.toggleClass('vdo-bg-' + k, bg === k && k !== 'none');
+    host.toggleClass('vdo-bg-host', bg !== 'none');
+    host.setCssProps({ '--vdo-dim': String(s.bgDim / 100), '--vdo-glow': String(s.bgGlow / 100), '--vdo-own': own ? `url("${own.replace(/"/g, '%22')}")` : '' });
+  }
   async render() {
+    this.paintBackground();
     const el = this.contentEl; el.empty(); el.addClass('vdo');
     this.page = null; this.cur = null;
     const p = this.p;
@@ -316,6 +346,9 @@ class VDocsView extends ItemView {
     more.onclick = e => {
       const m = new Menu();
       m.addItem(i => i.setTitle(d.pinned ? 'Unpin' : 'Pin to the top').setIcon('pin').onClick(() => { d.pinned = !d.pinned || undefined; this.save(d); }));
+      m.addItem(i => i.setTitle('Export as .vdoc…').setIcon('file-key').onClick(() => new VDShareModal(this, d).open()));
+      m.addItem(i => i.setTitle('Open a .vdoc…').setIcon('file-input').onClick(() => new VDVdocPicker(this).open()));
+      m.addSeparator && m.addSeparator();
       m.addItem(i => i.setTitle('Move to Bin').setIcon('trash-2').onClick(() => this.binDoc(d)));
       m.showAtMouseEvent(e);
     };
@@ -379,15 +412,16 @@ class VDocsView extends ItemView {
     try { await this.p.writeDoc(d); this.paintStatus('Saved'); } catch (e) { this.dirty = true; this.paintStatus('Not saved!'); new Notice('vDocs: could not save. ' + (e.message || e)); }
     this.paintList();
   }
-  async newDoc() {
+  async newDoc(html, title) {
     if (this.dirty) await this.flush();
     const now = Date.now(), id = vdId();
-    const d = { id, title: '', html: '<p><br></p>', created: now, updated: now, words: 0 };
+    const d = { id, title: title || '', html: html || '<p><br></p>', created: now, updated: now, words: 0 };
+    if (html) d.words = vdWords(vdCleanEl(html, false).textContent || '');
     const f = this.folder(this.sel); if (f) d.folder = f.id;
     this.p.docs.set(id, d);
     await this.p.writeDoc(d);
     this.openDoc(id);
-    window.setTimeout(() => this.titleEl && this.titleEl.focus(), 30);
+    if (!title) window.setTimeout(() => this.titleEl && this.titleEl.focus(), 30);
   }
   async binDoc(d) {
     if (this.dirty) await this.flush();
@@ -432,11 +466,36 @@ class VDocsSettings extends PluginSettingTab {
     const all = p.findVaults();
     new Setting(el).setName('Vault file').setDesc(all.length ? 'Your Vault.vdocs file inside this Obsidian vault.' : 'No .vdocs file found in this Obsidian vault yet.')
       .addDropdown(d => { d.addOption('', all.length === 1 ? 'Find it for me' : 'Choose…'); for (const a of all) d.addOption(a, a); d.setValue(all.includes(s.vaultPath) ? s.vaultPath : '').onChange(async v => { s.vaultPath = v; await p.save(); p.forget(); p.store = null; const vw = p.view(); if (vw) vw.render(); }); });
+    new Setting(el).setName('Lock when I leave vDocs').setDesc('Going to another note or tab locks vDocs, and your PIN opens it again.')
+      .addToggle(t => t.setValue(s.lockOnLeave !== false).onChange(async v => { s.lockOnLeave = v; await p.save(); }));
     new Setting(el).setName('Lock after').setDesc('Locks itself when you’ve been away from Obsidian this long. Your PIN opens it again.')
       .addDropdown(d => d.addOptions({ 1: '1 minute', 5: '5 minutes', 15: '15 minutes', 30: '30 minutes', 60: '1 hour', 0: 'Never' }).setValue(String(s.idle)).onChange(async v => { s.idle = Number(v); await p.save(); }));
+    new Setting(el).setName('Exported .vdoc files go in').setDesc('A folder in this Obsidian vault. Leave empty to save them next to your vault file.')
+      .addText(t => t.setPlaceholder('Next to Vault.vdocs').setValue(s.exportDir).onChange(async v => { s.exportDir = v.trim(); await p.save(); }));
+    new Setting(el).setName('Looks').setHeading();
+    new Setting(el).setName('Background').setDesc('Static Aurora follows the colours of the Static Aurora theme as they change. Or pick a picture.')
+      .addDropdown(d => d.addOptions(VD_BGS).setValue(VD_BGS[s.bg] ? s.bg : 'none').onChange(async v => { s.bg = v; await p.save(); p.redrawBg(); this.display(); }));
+    if (s.bg === 'own') {
+      const f = p.app.vault.getAbstractFileByPath(s.bgImage || '');
+      new Setting(el).setName('Your picture').setDesc(f ? s.bgImage : 'Choose an image from this Obsidian vault. It isn’t encrypted, so pick something you don’t mind being seen.')
+        .addButton(b => b.setButtonText(f ? 'Change…' : 'Choose…').onClick(() => new VDImagePicker(p.app, async path => { s.bgImage = path; await p.save(); p.redrawBg(); this.display(); }).open()));
+    }
+    if (s.bg !== 'none') {
+      if (s.bg === 'aurora') new Setting(el).setName('Glow').addSlider(sl => sl.setLimits(10, 100, 5).setValue(s.bgGlow).setDynamicTooltip().onChange(async v => { s.bgGlow = v; await p.save(); p.redrawBg(); }));
+      new Setting(el).setName('Darken').setDesc('Keeps your writing easy to read.').addSlider(sl => sl.setLimits(0, 90, 5).setValue(s.bgDim).setDynamicTooltip().onChange(async v => { s.bgDim = v; await p.save(); p.redrawBg(); }));
+    }
+    new Setting(el).setName('This device').setHeading();
     new Setting(el).setName('This device’s name').setDesc('Shown in the vDocs app when it takes in changes from here.')
       .addText(t => t.setPlaceholder(p.deviceName()).setValue(s.device).onChange(async v => { s.device = v.trim().slice(0, 40); await p.save(); }));
     new Setting(el).setName('Forget the PIN on this device').setDesc('Next time it asks for your vDocs password, and you choose a new PIN.')
       .addButton(b => b.setButtonText('Forget').onClick(() => { if (p.store) p.savePinRec(null); p.lock(); new Notice('vDocs: this device has forgotten its PIN.'); }));
   }
+}
+
+// choose a background picture from the images in this Obsidian vault
+class VDImagePicker extends FuzzySuggestModal {
+  constructor(app, done) { super(app); this.done = done; this.setPlaceholder('Find an image in your vault'); }
+  getItems() { return this.app.vault.getFiles().filter(f => VD_IMG.includes((f.extension || '').toLowerCase())); }
+  getItemText(f) { return f.path; }
+  onChooseItem(f) { this.done(f.path); }
 }
