@@ -1,0 +1,11 @@
+{
+  "id": "vdocs",
+  "name": "vDocs",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Open your encrypted vDocs vault inside your vault: private documents that stay encrypted on disk, unlocked with a PIN on each device.",
+  "author": "AshOtis",
+  "authorUrl": "https://github.com/AshOtis",
+  "fundingUrl": "https://buymeacoffee.com/ashotis",
+  "isDesktopOnly": false
+}

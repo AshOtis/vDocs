@@ -1,0 +1,53 @@
+/* vDocs for Obsidian: follows your Obsidian theme */
+.vdo { padding: 0 !important; }
+.vdo-lock { height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.vdo-lockbox { width: min(420px, 100%); text-align: center; display: flex; flex-direction: column; gap: 10px; }
+.vdo-lockbox h2 { margin: 4px 0 0; }
+.vdo-lockbox p { color: var(--text-muted); margin: 0 0 6px; }
+.vdo-lockic { margin: 0 auto; width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in srgb, var(--interactive-accent) 16%, transparent); color: var(--interactive-accent); }
+.vdo-lockic svg { width: 28px; height: 28px; }
+.vdo-input { width: 100%; text-align: center; font-size: var(--font-ui-medium); padding: 8px 10px; height: auto; }
+.vdo-pin { letter-spacing: .35em; font-size: 1.4em; }
+.vdo-err { color: var(--text-error); min-height: 1.3em; font-size: var(--font-ui-small); }
+.vdo-row { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.vdo-link { background: none !important; box-shadow: none !important; border: 0 !important; color: var(--text-accent); padding: 0 !important; margin-right: auto; cursor: pointer; font-size: var(--font-ui-small); }
+.vdo-wide { width: 100%; }
+.vdo-small { color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.vdo-sp { flex: 1; }
+.vdo-main { display: grid; grid-template-columns: minmax(180px, 250px) 1fr; height: 100%; min-height: 0; }
+.vdo-side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--background-modifier-border); background: var(--background-secondary); }
+.vdo-sidetop { display: flex; gap: 4px; align-items: center; padding: 10px 8px 6px; }
+.vdo-search { flex: 1; min-width: 0; }
+.vdo-list { flex: 1; overflow-y: auto; padding: 4px 6px; }
+.vdo-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px calc(8px + var(--depth, 0) * 14px); border-radius: var(--radius-s); cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); }
+.vdo-item:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.vdo-item.is-on { background: var(--background-modifier-active-hover); color: var(--text-normal); }
+.vdo-item.is-sel .vdo-t { color: var(--text-normal); }
+.vdo-ic { display: inline-flex; flex: none; } .vdo-ic svg { width: 15px; height: 15px; }
+.vdo-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vdo-foot { padding: 8px 12px 12px; border-top: 1px solid var(--background-modifier-border); display: flex; flex-direction: column; gap: 4px; }
+.vdo-binlink { align-self: flex-start; }
+.vdo-warn { color: var(--text-warning, var(--text-error)); }
+.vdo-doc { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.vdo-bar { display: flex; align-items: center; gap: 2px; padding: 6px 12px; border-bottom: 1px solid var(--background-modifier-border); flex-wrap: wrap; }
+.vdo-paper { flex: 1; overflow-y: auto; padding: 28px max(24px, calc((100% - var(--file-line-width, 700px)) / 2)) 80px; }
+.vdo-title { width: 100%; border: 0 !important; background: none !important; box-shadow: none !important; font-size: 2em; font-weight: 700; padding: 0 !important; margin-bottom: 12px; color: var(--text-normal); height: auto; }
+.vdo-page { outline: none; font-family: var(--font-text); font-size: var(--font-text-size); line-height: var(--line-height-normal); color: var(--text-normal); min-height: 50vh; user-select: text; }
+.vdo-page img { max-width: 100%; border-radius: 6px; }
+.vdo-page blockquote { margin: 1em 0; padding: .2em 0 .2em 1.1em; border-left: 3px solid var(--interactive-accent); color: var(--text-muted); font-style: italic; }
+.vdo-page mark { background: var(--text-highlight-bg); color: inherit; }
+.vdo-page ul.vd-check { list-style: none; padding-left: 1.9em; }
+.vdo-page ul.vd-check > li { position: relative; }
+.vdo-page ul.vd-check > li::before { content: ""; position: absolute; left: -1.7em; top: .28em; width: 1.05em; height: 1.05em; border: 2px solid var(--text-faint); border-radius: 4px; cursor: pointer; box-sizing: border-box; }
+.vdo-page ul.vd-check > li[data-done]::before { background: var(--interactive-accent); border-color: var(--interactive-accent); }
+.vdo-page ul.vd-check > li[data-done]::after { content: ""; position: absolute; left: -1.33em; top: .43em; width: .32em; height: .6em; border: solid var(--text-on-accent); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); pointer-events: none; }
+.vdo-page ul.vd-check > li[data-done] { color: var(--text-faint); text-decoration: line-through; }
+.vdo-page table { border-collapse: collapse; width: 100%; margin: .8em 0 1em; }
+.vdo-page td, .vdo-page th { border: 1px solid var(--background-modifier-border); padding: 6px 10px; vertical-align: top; }
+.vdo-none { margin: auto; color: var(--text-faint); padding: 40px; }
+.vdo-binrow { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--background-modifier-border); }
+@media (max-width: 700px) {
+  .vdo-main { grid-template-columns: 1fr; grid-template-rows: minmax(120px, 34%) 1fr; }
+  .vdo-side { border-right: 0; border-bottom: 1px solid var(--background-modifier-border); }
+  .vdo-paper { padding: 18px 16px 60px; }
+}
